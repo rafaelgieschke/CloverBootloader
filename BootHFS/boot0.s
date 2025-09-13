@@ -174,6 +174,7 @@ kDriveNumber        EQU  0x80
 .PartitionName              resb    72
                             endstruc
 
+%ifndef HEADER_ONLY
 ;
 ; Macros.
 ;
@@ -847,3 +848,4 @@ pad_table_and_sig:
 my_lba          resd    1   ; Starting LBA for read_lba function
 
 ; END
+%endif ; HEADER_ONLY

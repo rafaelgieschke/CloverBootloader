@@ -112,6 +112,10 @@ DIRBUFSEG			EQU		0x1000								; Cluster sizes >64KB aren't supported
 			endstruc
 
 	
+%define HEADER_ONLY
+%include "boot0.s"
+%undef HEADER_ONLY
+
 ;
 ; Macros.
 ;
@@ -175,21 +179,7 @@ DIRBUFSEG			EQU		0x1000								; Cluster sizes >64KB aren't supported
 	jmp		start
 	times	3-($-$$) nop
 
-gOEMName			times	8	db	0 ;OEMNAME
-gBPS				dw		0
-gSPC				db		0
-gReservedSectors	dw		0
-gNumFats			db		0
-gCrap1				times	11	db	0
-gPartLBA			dd		0
-gPartSize			dd		0
-gSectPerFat			dd		0
-gCrap2				times	4	db	0
-gRootCluster		dd		0
-gCrap3				times	16	db	0
-
 gBIOSDriveNumber	db	 	0
-gExtInfo			times	25 	db	0
 gFileName			db		"BOOT       " ; Used as a magic string in boot0
 
 ;--------------------------------------------------------------------------
@@ -209,20 +199,47 @@ start:
     mov     ds, ax                  ; ds <- 0
     mov     es, ax                  ; es <- 0
 
+    mov     [gBIOSDriveNumber], dl			; save BIOS drive number
+
+    xor     ecx, ecx
+    mov     al, 2
+    xor     edx, edx
+    mov     dx, kMBRBuffer
+    call    readSectors
+
+    mov     si, kLBA1Buffer
+
+    cmp     DWORD [si], kGPTSignatureLow        ; looking for 'EFI '
+    jne     error                               ; not found. Giving up.
+
+    mov     ecx, [si + gpth.PartitionEntryLBA]          ; starting LBA of GPT Array
+    mov     al, 32
+    add     dx, kGPTABuffer - kMBRBuffer
+    call    readSectors
+
+    mov     bx, [si + gpth.SizeOfPartitionEntry]
+    mov     dx, [si + gpth.NumberOfPartitionEntries]
+    mov     si, kGPTABuffer
+.gpt_loop:
+    cmp     dword [si + gpta.PartitionTypeGUID + kGUIDLastDwordOffs], kEFISystemGUID
+    je      .gpt_ok
+    add     si, bx
+    dec     dx
+    jz      error
+    jmp     .gpt_loop
+
+.gpt_ok:
+    mov     ecx, [si + gpta.StartingLBA]
+    mov     al, 1
+    mov     dx, gPart
+    call    readSectors
+
     ;
     ; Initializing global variables.
     ;
-    mov ax, word [gReservedSectors]
-%if USESIDL
-    add     eax, [si + part.lba]
-%else
-    add     eax, [gPartLBA]
-%endif
-    mov     [gPartLBA], eax					; save the current FAT LBA offset
-%if USESIDL
-    mov     [gBIOSDriveNumber], dl			; save BIOS drive number
-%endif
-	xor eax,eax
+    add     cx, [gReservedSectors]
+    mov     [gPartLBA], ecx					; save the current FAT LBA offset
+    xor     ecx, ecx
 	mov al, [gNumFats]
 	mul dword [gSectPerFat]
 	mov [gSectPerFat], eax
@@ -316,6 +333,7 @@ error:
 %if VERBOSE
     LogString(error_str)
 %endif
+    int     0x18
 	
 hang:
     hlt
@@ -628,9 +646,26 @@ error_str		db		'error', NULL
 ; that the 'times' argument is negative.
 
 pad_table_and_sig:
-	times			510-($-$$) db 0
-	dw				kBootSignature
+	times			440-($-$$) db 0
 
 	ABSOLUTE		kBoot1LoadAddr + kSectorBytes
+
+gPart            resb 3
+
+gOEMName         resb 8
+gBPS             resw 1
+gSPC             resb 1
+gReservedSectors resw 1
+gNumFats         resb 1
+gCrap1           resb 11
+gPartLBA         resd 1
+gPartSize        resd 1
+gSectPerFat      resd 1
+gCrap2           resb 4
+gRootCluster     resd 1
+gCrap3           resb 16
+
+xBIOSDriveNumber resb 1
+gExtInfo         resb 25
 
 ; END
